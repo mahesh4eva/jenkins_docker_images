@@ -1,0 +1,13 @@
+# How to get current list of plugins??
+Jenkins.instance.pluginManager.plugins.each{
+  plugin -> 
+    println ("${plugin.getShortName()}:${plugin.getVersion()}")
+}
+
+# build
+docker build -t <name of image you want> .    --> (dot at end is necessary)
+ex: docker build -t myjenkins:latest .
+
+
+# Run
+docker run -p 8080:8080 -p 50000:50000 -v <volume_name>:/var/jenkins_home myjenkins:latest

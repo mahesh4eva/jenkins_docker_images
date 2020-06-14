@@ -1,0 +1,91 @@
+#!/bin/bash
+
+JENKINS_PRIMARY=jenkins-primary
+JENKINS_PORT=8080
+JENKINS_VOLUME=jenkins_volume
+JENKINS_NETWORK=jenkins_network
+REPLICAS=(ruby1 ruby2 python1 maven1 maven2 maven3)
+
+# check if jenkins primary running and stop if it is and remove the container
+if docker container inspect $JENKINS_PRIMARY > /dev/null
+then
+  docker stop $JENKINS_PRIMARY
+  docker rm $JENKINS_PRIMARY
+fi
+
+# handling the replica containers
+for replica in "${REPLICAS[@]}"
+do
+  if docker container inspect "$replica"_node > /dev/null
+  then
+    docker stop "$replica"_node
+    docker rm "$replica"_node
+  fi
+done
+
+# check if jenkins volume exists. ask user if it is allowed to delete the volume and create new volume
+if docker volume inspect $JENKINS_VOLUME > /dev/null
+  then
+  read -p "Docker volume $JENKINS_VOLUME already exists. Do you want to delete and recreate it? [Y/n] " prompt_volume
+  if [ $prompt_volume == "y" ]
+  then
+    docker volume rm $JENKINS_VOLUME
+    docker volume create $JENKINS_VOLUME
+  fi
+else
+  docker volume create $JENKINS_VOLUME
+fi
+
+# check if jenkins network exists. ask user if it is allwoed to delete and create new network
+if docker network inspect $JENKINS_NETWORK > /dev/null
+  then
+  read -p "Docker network inspect $JENKINS_NETWORK already exists. Do you want to delete and recreate it? [Y/n] " prompt_network 
+  if [ $prompt_network == "y" ]
+  then
+    docker network rm $JENKINS_NETWORK
+    docker network create $JENKINS_NETWORK
+  fi
+else
+  docker network create $JENKINS_NETWORK
+fi
+
+# building the images. if you have any custom nodes, build here
+docker build -t jenkins ./jenkins/primary
+docker build -t ruby_node ./jenkins/replicas/ruby
+docker build -t python_node ./jenkins/replicas/python
+docker build -t maven_node ./jenkins/replicas/maven
+
+# running jenkins docker
+docker run -d --name $JENKINS_PRIMARY --network $JENKINS_NETWORK -p $JENKINS_PORT:8080 -p 50000:50000 -v $JENKINS_VOLUME:/var/jenkins_home jenkins:latest
+
+# giving sometime to finish the setup
+sleep 30
+
+# running nodes and attaching to primary
+rm *.txt
+
+for replica in "${REPLICAS[@]}"
+do
+  docker cp $JENKINS_PRIMARY:/var/jenkins_home/"$replica".txt $PWD/"$replica".txt
+  token=`cat "$replica".txt`
+  echo "DEPLOYING $replica NODE"
+  if [[ "$replica" =~ .*ruby.* ]]
+  then
+    docker run -d --name "$replica"_node --network $JENKINS_NETWORK \
+      -e JENKINS_URL=http://$JENKINS_PRIMARY:$JENKINS_PORT \
+      -e JENKINS_SECRET=$token \
+      -e JENKINS_AGENT_NAME=$replica ruby_node:latest
+  elif [[ "$replica" =~ .*python.* ]]
+  then
+    docker run -d --name "$replica"_node --network $JENKINS_NETWORK \
+      -e JENKINS_URL=http://$JENKINS_PRIMARY:$JENKINS_PORT \
+      -e JENKINS_SECRET=$token \
+      -e JENKINS_AGENT_NAME=$replica python_node:latest
+  elif [[ "$replica" =~ .*maven.* ]]
+  then
+    docker run -d --name "$replica"_node --network $JENKINS_NETWORK \
+      -e JENKINS_URL=http://$JENKINS_PRIMARY:$JENKINS_PORT \
+      -e JENKINS_SECRET=$token \
+      -e JENKINS_AGENT_NAME=$replica maven_node:latest
+  fi
+done

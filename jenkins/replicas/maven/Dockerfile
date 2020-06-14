@@ -1,0 +1,15 @@
+# https://github.com/jenkinsci/jnlp-agents
+FROM jenkins/jnlp-slave:alpine as jnlp
+
+FROM maven:3.6.2-jdk-8-slim
+
+RUN apt-get update && \
+    apt-get install -y \
+        git \
+        libfontconfig1 \
+        libfreetype6
+
+COPY --from=jnlp /usr/local/bin/jenkins-agent /usr/local/bin/jenkins-agent
+COPY --from=jnlp /usr/share/jenkins/agent.jar /usr/share/jenkins/agent.jar
+
+ENTRYPOINT ["/usr/local/bin/jenkins-agent"]
